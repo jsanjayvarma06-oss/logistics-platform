@@ -1,68 +1,182 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { dispatch } from '../lib/api';
-import { Plus } from 'lucide-react';
+import { Plus, Zap, Search, Upload, QrCode, ExternalLink, Filter } from 'lucide-react';
 
-const STATUS_COLORS = { available: '#10b981', on_delivery: '#3b82f6', offline: '#6b7280', on_break: '#f59e0b' };
+const STATUS_COLORS = {
+  pending: '#f59e0b', confirmed: '#3b82f6', dispatched: '#8b5cf6',
+  in_transit: '#6366f1', delivered: '#10b981', cancelled: '#ef4444', returned: '#f97316',
+};
 
-export default function Drivers() {
-  const [drivers, setDrivers] = useState([]);
+export default function Dispatch() {
+  const [orders, setOrders] = useState([]);
+  const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', vehicleType: 'van', vehicleNumber: '' });
+  const [planning, setPlanning] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showImport, setShowImport] = useState(false);
+  const [csvData, setCsvData] = useState('');
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef();
 
   const load = () => {
-    dispatch.drivers.list().then(res => { setDrivers(res.data || []); setLoading(false); }).catch(() => setLoading(false));
+    dispatch.orders.list({ limit: 200 }).then(res => {
+      const data = res.data || [];
+      setOrders(data);
+      setFiltered(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   };
 
   useEffect(load, []);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    let result = orders;
+    if (statusFilter !== 'all') result = result.filter(o => o.status === statusFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(o =>
+        o.customerName?.toLowerCase().includes(q) ||
+        o.orderNumber?.toLowerCase().includes(q) ||
+        o.shippingAddress?.city?.toLowerCase().includes(q)
+      );
+    }
+    setFiltered(result);
+  }, [search, statusFilter, orders]);
+
+  const handleAutoPlan = async () => {
+    setPlanning(true);
     try {
-      await dispatch.drivers.create(form);
-      setShowForm(false);
-      setForm({ name: '', phone: '', vehicleType: 'van', vehicleNumber: '' });
+      const res = await dispatch.orders.autoPlan();
+      alert(`Created ${res.planned} shipments`);
       load();
     } catch (err) { alert(err.message); }
+    setPlanning(false);
   };
+
+  // Bulk CSV import
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setCsvData(ev.target.result);
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    if (!csvData) return alert('Upload a CSV file first');
+    setImporting(true);
+    try {
+      const lines = csvData.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const rows = lines.slice(1);
+
+      let created = 0;
+      for (const row of rows) {
+        const cols = row.split(',').map(c => c.trim().replace(/"/g, ''));
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = cols[i]);
+
+        await dispatch.orders.create({
+          items: [{ productId: obj.product_id || 'unknown', sku: obj.sku || '', name: obj.product_name || 'Product', quantity: parseInt(obj.quantity) || 1 }],
+          shippingAddress: { line1: obj.address || '', city: obj.city || '', state: obj.state || '', postalCode: obj.pincode || '' },
+          customerName: obj.customer_name || 'Unknown',
+          customerPhone: obj.phone || '',
+          priority: obj.priority || 'normal',
+        });
+        created++;
+      }
+      alert(`Imported ${created} orders`);
+      setShowImport(false);
+      setCsvData('');
+      load();
+    } catch (err) { alert('Import failed: ' + err.message); }
+    setImporting(false);
+  };
+
+  const getTrackingUrl = (orderId) => `${window.location.origin}/track/${orderId}`;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h2 className="page-title">Drivers</h2>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}><Plus size={16} /> Add Driver</button>
+        <h2 className="page-title">Dispatch</h2>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn" onClick={() => setShowImport(!showImport)}><Upload size={14} /> Import CSV</button>
+          <button className="btn btn-accent" onClick={handleAutoPlan} disabled={planning}>
+            <Zap size={14} /> {planning ? 'Planning...' : 'Auto Plan'}
+          </button>
+        </div>
       </div>
 
-      {showForm && (
-        <form className="card form-card" onSubmit={handleCreate}>
-          <div className="form-grid">
-            <input placeholder="Driver Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
-            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required />
-            <select value={form.vehicleType} onChange={e => setForm({ ...form, vehicleType: e.target.value })}>
-              <option value="bike">Bike</option><option value="van">Van</option><option value="truck">Truck</option>
-            </select>
-            <input placeholder="Vehicle Number" value={form.vehicleNumber} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} />
+      {/* CSV Import panel */}
+      {showImport && (
+        <div className="card form-card">
+          <div className="card-title">Bulk import orders via CSV</div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+            CSV headers: <code>customer_name, phone, address, city, state, pincode, sku, product_name, quantity, priority</code>
+          </p>
+          <input type="file" accept=".csv" ref={fileRef} onChange={handleFileUpload} style={{ display: 'none' }} />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn" onClick={() => fileRef.current.click()}><Upload size={14} /> Choose CSV file</button>
+            {csvData && <span style={{ fontSize: '0.78rem', color: '#10b981', alignSelf: 'center' }}>✓ File loaded</span>}
+            <button className="btn btn-primary" onClick={handleImport} disabled={importing}>
+              {importing ? 'Importing...' : 'Import orders'}
+            </button>
           </div>
-          <div className="form-actions">
-            <button type="button" className="btn" onClick={() => setShowForm(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Create</button>
-          </div>
-        </form>
+        </div>
       )}
 
+      {/* Search and filters */}
+      <div className="filter-bar">
+        <div className="search-wrap">
+          <Search size={14} className="search-icon" />
+          <input
+            className="search-input"
+            placeholder="Search by customer, order number, city..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="dispatched">Dispatched</option>
+          <option value="in_transit">In transit</option>
+          <option value="delivered">Delivered</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="returned">Returned</option>
+        </select>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', alignSelf: 'center' }}>{filtered.length} orders</span>
+      </div>
+
       <div className="card">
-        {loading ? <p>Loading...</p> : (
+        {loading ? <p style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading...</p> : (
           <table className="data-table">
-            <thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th>Status</th><th>Rating</th><th>Deliveries</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Order</th><th>Customer</th><th>City</th><th>Items</th>
+                <th>Status</th><th>Priority</th><th>Track</th><th>Created</th>
+              </tr>
+            </thead>
             <tbody>
-              {drivers.map(d => (
-                <tr key={d._id}>
-                  <td>{d.name}</td><td>{d.phone}</td><td>{d.vehicleType} — {d.vehicleNumber || '—'}</td>
-                  <td><span className="status-badge" style={{ background: `${STATUS_COLORS[d.status]}20`, color: STATUS_COLORS[d.status] }}>{d.status}</span></td>
-                  <td>⭐ {d.rating?.toFixed(1)}</td><td>{d.totalDeliveries}</td>
+              {filtered.map(o => (
+                <tr key={o._id}>
+                  <td><code>{o.orderNumber}</code></td>
+                  <td>{o.customerName}</td>
+                  <td>{o.shippingAddress?.city || '—'}</td>
+                  <td>{o.items?.length || 0}</td>
+                  <td><span className="status-badge" style={{ background: `${STATUS_COLORS[o.status]}20`, color: STATUS_COLORS[o.status] }}>{o.status}</span></td>
+                  <td><span className="status-badge" style={{ background: o.priority === 'urgent' ? '#ef444420' : '#6366f120', color: o.priority === 'urgent' ? '#ef4444' : '#6366f1' }}>{o.priority}</span></td>
+                  <td>
+                    <a href={getTrackingUrl(o._id)} target="_blank" rel="noreferrer" style={{ color: '#6366f1', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <ExternalLink size={12} /> Track
+                    </a>
+                  </td>
+                  <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                 </tr>
               ))}
-              {!drivers.length && <tr><td colSpan="6" className="text-muted">No drivers yet</td></tr>}
+              {!filtered.length && <tr><td colSpan="8" className="text-muted">No orders found</td></tr>}
             </tbody>
           </table>
         )}
