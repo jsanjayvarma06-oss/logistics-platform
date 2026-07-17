@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  'https://jwqahlyybmhqpurovnnd.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3cWFobHl5Ym1ocXB1cm92bm5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNjQ0ODMsImV4cCI6MjA5OTg0MDQ4M30.J6cqGhAJQma5Zccq0ZTl94-1obR_qsw7MF148MBS5Eo'
 );
-
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
