@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: inventory-service
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/logistics-platform.git
+    targetRevision: main
+    path: infrastructure/k8s/base
+    kustomize:
+      namePrefix: inventory-
+      images:
+        - ghcr.io/your-org/inventory-service:latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logistics
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
