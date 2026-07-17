@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const handlers = require('../events/handlers');
 
+// QStash sends POST requests to these endpoints
 router.post('/:topic', async (req, res) => {
   const topic = req.params.topic;
   try {
