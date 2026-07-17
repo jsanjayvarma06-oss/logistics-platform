@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { dispatch, inventory } from '../lib/api';
-import { Package, Truck, CheckCircle, Clock, AlertTriangle, Users, Zap } from 'lucide-react';
+import { Package, Truck, CheckCircle, Clock, AlertTriangle, Users, Zap, Map } from 'lucide-react';
+import LiveMap from '../components/LiveMap';
 
 function StatCard({ icon: Icon, label, value, color }) {
   return (
@@ -40,21 +41,35 @@ export default function Dashboard() {
   const [lowStock, setLowStock] = useState([]);
   const [orders, setOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mapView, setMapView] = useState(false);
 
   useEffect(() => {
     Promise.all([
       dispatch.orders.dashboard().catch(() => ({ data: {} })),
       inventory.products.lowStock().catch(() => ({ data: [] })),
-      dispatch.orders.list({ limit: 6 }).catch(() => ({ data: [] })),
+      dispatch.orders.list({ limit: 50 }).catch(() => ({ data: [] })),
       dispatch.drivers.list().catch(() => ({ data: [] })),
-    ]).then(([dashRes, lowRes, ordersRes, driversRes]) => {
+      inventory.warehouses.list().catch(() => ({ data: [] })),
+    ]).then(([dashRes, lowRes, ordersRes, driversRes, whRes]) => {
       setStats(dashRes.data);
       setLowStock(lowRes.data || []);
       setOrders(ordersRes.data || []);
       setDrivers(driversRes.data || []);
+      setWarehouses(whRes.data || []);
       setLoading(false);
     });
+  }, []);
+
+  // Refresh driver locations every 10s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      dispatch.drivers.list().catch(() => {}).then(res => {
+        if (res?.data) setDrivers(res.data);
+      });
+    }, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleAutoPlan = async () => {
@@ -68,26 +83,52 @@ export default function Dashboard() {
   if (loading) return <div className="page-loading">Loading dashboard...</div>;
 
   const deliveryRate = stats?.totalOrders
-    ? Math.round((stats.delivered / stats.totalOrders) * 100)
-    : 0;
+    ? Math.round((stats.delivered / stats.totalOrders) * 100) : 0;
+
+  const activeOrders = orders.filter(o => !['delivered', 'cancelled'].includes(o.status));
+  const recentOrders = orders.slice(0, 6);
 
   return (
     <div className="page">
       <div className="page-header">
         <h2 className="page-title">Dashboard</h2>
-        <button className="btn btn-accent" onClick={handleAutoPlan}>
-          <Zap size={15} /> Auto Plan
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn" onClick={() => setMapView(!mapView)}>
+            <Map size={14} /> {mapView ? 'Hide map' : 'Live map'}
+          </button>
+          <button className="btn btn-accent" onClick={handleAutoPlan}>
+            <Zap size={14} /> Auto Plan
+          </button>
+        </div>
       </div>
 
+      {/* Stats */}
       <div className="stats-grid">
-        <StatCard icon={Clock} label="Pending" value={stats?.pending || 0} color="#f59e0b" />
-        <StatCard icon={Truck} label="In transit" value={stats?.dispatched || 0} color="#3b82f6" />
-        <StatCard icon={CheckCircle} label="Delivered" value={stats?.delivered || 0} color="#10b981" />
-        <StatCard icon={Users} label="Active drivers" value={stats?.activeDrivers || 0} color="#8b5cf6" />
-        <StatCard icon={AlertTriangle} label="Low stock" value={lowStock.length} color="#ef4444" />
-        <StatCard icon={Package} label="Total orders" value={stats?.totalOrders || 0} color="#6366f1" />
+        <StatCard icon={Clock}         label="Pending"        value={stats?.pending || 0}       color="#f59e0b" />
+        <StatCard icon={Truck}         label="In transit"     value={stats?.dispatched || 0}     color="#3b82f6" />
+        <StatCard icon={CheckCircle}   label="Delivered"      value={stats?.delivered || 0}      color="#10b981" />
+        <StatCard icon={Users}         label="Active drivers" value={stats?.activeDrivers || 0}  color="#8b5cf6" />
+        <StatCard icon={AlertTriangle} label="Low stock"      value={lowStock.length}            color="#ef4444" />
+        <StatCard icon={Package}       label="Total orders"   value={stats?.totalOrders || 0}    color="#6366f1" />
       </div>
+
+      {/* Live Map */}
+      {mapView && (
+        <div className="card" style={{ marginBottom: '0.75rem' }}>
+          <div className="card-title">
+            Live map
+            <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem' }}>
+              <span>🏭 Warehouse</span>
+              <span>📦 Order</span>
+              <span>🚗 Driver</span>
+              <span>🔴 Urgent</span>
+            </div>
+          </div>
+          <div style={{ height: 420, borderRadius: 'var(--radius)', overflow: 'hidden', border: '0.5px solid var(--border)' }}>
+            <LiveMap orders={activeOrders} drivers={drivers} warehouses={warehouses} />
+          </div>
+        </div>
+      )}
 
       <div className="dash-grid">
         {/* Recent Orders */}
@@ -96,19 +137,23 @@ export default function Dashboard() {
           <table className="data-table">
             <thead><tr><th>Order</th><th>Customer</th><th>Status</th></tr></thead>
             <tbody>
-              {orders.map(o => (
+              {recentOrders.map(o => (
                 <tr key={o._id}>
                   <td><code>{o.orderNumber}</code></td>
                   <td>{o.customerName}</td>
-                  <td><span className="status-badge" style={{ background: `${STATUS_COLORS[o.status]}20`, color: STATUS_COLORS[o.status] }}>{o.status}</span></td>
+                  <td>
+                    <span className="status-badge" style={{ background: `${STATUS_COLORS[o.status]}20`, color: STATUS_COLORS[o.status] }}>
+                      {o.status}
+                    </span>
+                  </td>
                 </tr>
               ))}
-              {!orders.length && <tr><td colSpan="3" className="text-muted">No orders yet</td></tr>}
+              {!recentOrders.length && <tr><td colSpan="3" className="text-muted">No orders yet</td></tr>}
             </tbody>
           </table>
         </div>
 
-        {/* Weekly sparkline + delivery rate */}
+        {/* Weekly chart + delivery rate */}
         <div className="card">
           <div className="card-title">This week</div>
           <div className="sparkline-wrap">
@@ -144,14 +189,19 @@ export default function Dashboard() {
 
         {/* Driver status */}
         <div className="card">
-          <div className="card-title">Driver status</div>
+          <div className="card-title">
+            Driver status
+            <span style={{ fontSize: '0.7rem', color: '#10b981' }}>● Live</span>
+          </div>
           <div className="driver-grid">
             {drivers.map(d => (
               <div key={d._id} className="driver-chip">
                 <div className="driver-avatar">{d.name.split(' ').map(n => n[0]).join('').slice(0, 2)}</div>
                 <div>
                   <div style={{ fontSize: '0.75rem', fontWeight: 500 }}>{d.name.split(' ')[0]}</div>
-                  <div style={{ fontSize: '0.65rem', color: DRIVER_STATUS_COLORS[d.status] || '#6b7280' }}>{d.status}</div>
+                  <div style={{ fontSize: '0.65rem', color: DRIVER_STATUS_COLORS[d.status] || '#6b7280' }}>
+                    {d.status.replace('_', ' ')}
+                  </div>
                 </div>
                 <div className="driver-dot" style={{ background: DRIVER_STATUS_COLORS[d.status] || '#6b7280' }} />
               </div>
@@ -160,7 +210,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Low stock alerts */}
+        {/* Low stock */}
         <div className="card">
           <div className="card-title">Low stock alerts</div>
           {lowStock.length === 0
@@ -179,7 +229,8 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
-            )}
+            )
+          }
         </div>
       </div>
     </div>
