@@ -57,24 +57,18 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
 
-  # ── Argcord Console ──
+  # ── Argcord Console (Web Service) ──
   - type: web
     name: argcord-console
-    runtime: static
+    runtime: node
     region: singapore
     plan: free
     rootDir: console
     buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: public, max-age=0, must-revalidate
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    startCommand: npx serve dist -s -l 3000
     envVars:
+      - key: PORT
+        value: 3000
       - key: VITE_INVENTORY_URL
         fromService:
           name: logistics-inventory
