@@ -1,16 +1,33 @@
 const INVENTORY_URL = import.meta.env.VITE_INVENTORY_URL || 'http://localhost:3001';
 const DISPATCH_URL = import.meta.env.VITE_DISPATCH_URL || 'http://localhost:3002';
-const TENANT_ID = import.meta.env.VITE_TENANT_ID || 'demo-tenant';
+
+function getAuth() {
+  const session = JSON.parse(localStorage.getItem('logistics_session') || '{}');
+  return {
+    tenantId: session.tenant_id || 'demo-tenant',
+    token: session.access_token || null,
+  };
+}
 
 async function request(baseUrl, path, options = {}) {
+  const { tenantId, token } = getAuth();
+
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'x-tenant-id': TENANT_ID,
+      'x-tenant-id': tenantId,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem('logistics_session');
+    window.location.href = '/login';
+    return;
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || 'Request failed');
