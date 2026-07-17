@@ -59,7 +59,7 @@ services:
 
   # ── Argcord Console (Web Service) ──
   - type: web
-    name: argcord-console
+    name: prodis-console
     runtime: node
     region: singapore
     plan: free
